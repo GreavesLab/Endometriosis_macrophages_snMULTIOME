@@ -1,0 +1,328 @@
+Figure 3: RRx-001 treatment remodels the transcriptional state and differentiation trajectory of peritoneal macrophages. 
+
+library(SingleCellExperiment)
+library(Signac)
+library(Seurat)
+library(SeuratObject)
+options(Seurat.object.assay.version = "v3")
+library(patchwork)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(EnsDb.Mmusculus.v79)
+library(metap)
+library(limma)
+library(harmony)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(topGO)
+library(org.Mm.eg.db)
+library(devtools)
+library(ArchR)
+library(clustree)
+library(cowplot)
+library(EnhancedVolcano)
+library(gprofiler2)
+library(scDblFinder)
+library(DropletUtils)
+library(SoupX)
+library(DoubletFinder)
+library(knitr)
+library(MAST)
+library(monocle3)
+library(SeuratWrappers)
+library(slingshot)
+library(ggtech)
+library(extrafont)
+library(hrbrthemes)
+library(gcookbook)
+library(grDevices)
+library(RColorBrewer)
+library(nnet)
+library(ggsci)
+library(tradeSeq)
+library(GOSemSim)
+library(simplifyEnrichment)
+library(motifmatchr)
+library(JASPAR2024)
+library(TFBSTools)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(purrr)
+library(ggseqlogo)
+library(magrittr)
+library(patchwork)
+library(scCustomize)
+library(qs)
+library(dittoSeq)
+library(Nebulosa)
+library(miloR)
+library(clusterProfiler)
+library(ggupset)
+library(ggplotify)
+library(ggridges)
+library(enrichplot)
+
+RRx_integrated <- readRDS("pathtofile.RDS")
+
+# Figure 3A ----
+
+Idents(rrx.integrated) <- rrx.integrated$sample_id
+sample_markers <- FindAllMarkers(rrx.integrated, assay = "RNA", test.use = "MAST")
+samples <- unique(sample_markers) 
+
+gsea_by_sample <- list()
+for (samp in samples) {
+  markers <- sample_markers %>% filter(cluster == samp)
+  
+  gene_list <- sort(setNames(markers$avg_log2FC, markers$gene), decreasing = TRUE)
+  
+  gsea <- gseGO(geneList     = gene_list,
+                OrgDb        = org.Mm.eg.db,
+                ont          = "MF",
+                keyType      = "SYMBOL",
+                minGSSize    = 15,
+                maxGSSize    = 500,
+                pvalueCutoff = 1,
+                verbose      = FALSE)
+  
+  gsea_by_sample[[samp]] <- gsea  
+  message(paste("Finished:", samp))
+}
+
+all_gsea <- bind_rows(
+  as.data.frame(gsea_by_sample$endo_control) %>% mutate(sample = "Vehicle"),
+  as.data.frame(gsea_by_sample$endo_drug)    %>% mutate(sample = "RRx-001"),
+  as.data.frame(gsea_by_sample$sham)         %>% mutate(sample = "Sham")
+)
+
+top_paths <- all_gsea %>%
+  filter(p.adjust < 0.05) %>%
+  group_by(sample) %>%
+  slice_max(abs(NES), n = 3) %>%
+  pull(Description) %>%
+  unique()
+
+get_ids <- function(gsea_obj, paths) {
+  gsea_obj@result %>%
+    filter(Description %in% paths) %>%
+    pull(ID)
+}
+
+p_sham <- gseaplot2(gsea_by_sample$sham, 
+                    geneSetID = get_ids(gsea_by_sample$sham, top_paths), 
+                    pvalue_table = FALSE)
+
+p_endo <- gseaplot2(gsea_by_sample$endo_control, 
+                    geneSetID = get_ids(gsea_by_sample$endo_control, top_paths), 
+                    pvalue_table = FALSE)
+
+p_drug <- gseaplot2(gsea_by_sample$endo_drug, 
+                    geneSetID = get_ids(gsea_by_sample$endo_drug, top_paths), 
+                    pvalue_table = FALSE)
+
+
+
+p_sham_grob  <- as.grob(p_sham)
+p_endo_grob  <- as.grob(p_endo)
+p_drug_grob  <- as.grob(p_drug)
+
+plot_grid(p_sham_grob, p_endo_grob, p_drug_grob, ncol = 3)
+
+p_sham[[1]]  <- p_sham[[1]]  + theme(legend.position = "none")
+p_endo[[1]]  <- p_endo[[1]]  + theme(legend.position = "none")
+p_drug[[1]]  <- p_drug[[1]]  + theme(legend.position = "none")
+
+p_for_legend <- gseaplot2(gsea_by_sample$sham, 
+                          geneSetID = get_ids(gsea_by_sample$sham, top_paths), 
+                          pvalue_table = FALSE)
+legend <- get_legend(p_for_legend[[1]] + theme(legend.position = "right"))
+
+# Convert to grobs
+p_sham_grob <- as.grob(p_sham)
+p_endo_grob <- as.grob(p_endo)
+p_drug_grob <- as.grob(p_drug)
+
+combined <- plot_grid(p_sham_grob, p_endo_grob, p_drug_grob, ncol = 2, nrow = 2)
+
+plot_grid(combined, legend, ncol = 2, rel_widths = c(3, 1))
+
+# Figure 3B ----
+
+identities <- levels(rrx.integrated@active.ident)
+
+my_color_palette <- hue_pal()(length(identities))
+my_color_palette
+
+sce <- as.SingleCellExperiment(rrx.integrated, assay = "RNA")
+
+sling.umap <- slingshot(sce, clusterLabels = colData(sce)$"ident", reducedDim = "WNN.UMAP", approx_points = 100, 
+                        start.clus = "SpM",  allow.breaks = TRUE)
+summary(sling.umap$slingPseudotime_1)
+
+
+colors_sling <- my_color_palette
+clusters_sling <- factor(sling.umap$ident, levels = c("LpM 2",  "LpM 5", "LpM 1",
+                                                      "LpM3",  "LpM4","SpM", "LpM 6"))
+color_df <- data.frame(cluster = c("LpM 2",  "LpM 5", "LpM 1","LpM3",  "LpM4","SpM", "LpM 6"), color = my_color_palette)
+assigned_color <- data.frame(cluster = sling.umap$ident) %>% left_join(color_df) %>% pull(color)
+
+plot(reducedDims(sling.umap)$WNN.UMAP, col = assigned_color, pch=16, asp = 1)
+lines(SlingshotDataSet(sling.umap), lwd=2, col='black')
+
+# Figure 3C ----
+plotcol_sling_1 <- plotcol_sling
+plotcol_sling_1[is.na(plotcol_sling_1)] <- 'grey'
+
+aaa <- SlingshotDataSet(sling.umap)
+
+aaa_df <- data.frame(X = aaa@curves$Lineage1$s[,1], Y = aaa@curves$Lineage1$s[,2])
+sling_df_1 <- data.frame(UMAP_1 = reducedDims(sling.umap)$WNN.UMAP[,1], UMAP_2 = reducedDims(sling.umap)$WNN.UMAP[,2],
+                         time = sling.umap$slingPseudotime_1) 
+
+ggplot(sling_df_1, aes(x = UMAP_1, y = UMAP_2)) + geom_point(aes(color = time)) + scale_colour_distiller(palette = "RdPu", direction = 1, na.value="lightgrey", name = 'Pseudotime') +
+  geom_path(data = aaa_df, aes(x = X, y = Y)) +
+  theme_light() +
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+aaa_df2 <- data.frame(X = aaa@curves$Lineage2$s[,1], Y = aaa@curves$Lineage2$s[,2])
+sling_df_2 <- data.frame(UMAP_1 = reducedDims(sling.umap)$WNN.UMAP[,1], UMAP_2 = reducedDims(sling.umap)$WNN.UMAP[,2],
+                         time = sling.umap$slingPseudotime_2) 
+
+ggplot(sling_df_2, aes(x = UMAP_1, y = UMAP_2)) + geom_point(aes(color = time)) + scale_colour_distiller(palette = "RdPu", direction = 1, na.value="lightgrey", name = 'Pseudotime') +
+  geom_path(data = aaa_df2, aes(x = X, y = Y)) +
+  theme_light() +
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+aaa_df3 <- data.frame(X = aaa@curves$Lineage3$s[,1], Y = aaa@curves$Lineage3$s[,2])
+sling_df_3 <- data.frame(UMAP_1 = reducedDims(sling.umap)$WNN.UMAP[,1], UMAP_2 = reducedDims(sling.umap)$WNN.UMAP[,2],
+                         time = sling.umap$slingPseudotime_3) 
+
+ggplot(sling_df_3, aes(x = UMAP_1, y = UMAP_2)) + geom_point(aes(color = time)) + scale_colour_distiller(palette = "RdPu", direction = 1, na.value="lightgrey", name = 'Pseudotime') +
+  geom_path(data = aaa_df3, aes(x = X, y = Y)) +
+  theme_light() +
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank())
+
+# Figure 3D ----
+lineages <- slingLineages(sling.umap)
+condition_sling <- sce$sample_id
+
+pt <- slingPseudotime(sling.umap, na=FALSE)
+cw <- slingCurveWeights(sling.umap)
+assignment <- apply(cw, 1, which.max)
+ptAs <- c() #assigned pseudotime
+for(ii in 1:nrow(pt)) ptAs[ii] <- pt[ii,assignment[ii]] 
+
+cond1 <- factor(condition_sling[assignment == 1])
+t1 <- ptAs[assignment == 1]
+model1 <- nnet::multinom(cond1 ~ t1)
+zvalues1 <- summary(model1)$coefficients / summary(model1)$standard.errors
+pnorm(abs(zvalues1), lower.tail=FALSE)*2
+
+model1_1 <- glm(cond1 ~ t1, family = glm)
+
+dses_1 <- data.frame(t1 = seq(min(t1),max(t1),length.out = 100))
+predictions_lineage1 <- predict(model1, newdata = dses_1, "probs")
+plot(dses_1$t1, unname(predictions_lineage1[,1]), pch = 20, col = "royalblue1",xlab = 'Pseudotime',ylab = 'Probability',ylim = c(0,0.75), main = 'Lineage 1')
+points(dses_1$t1, unname(predictions_lineage1[,2]), pch = 20, col = "firebrick1")
+points(dses_1$t1, unname(predictions_lineage1[,3]), pch = 20, col = "blueviolet")
+legend('right', legend=c("Sham", "Vehicle", "RRx-001"), col=c("blueviolet","royalblue1", "firebrick1"), pch = 20, cex=1, bty = "n")
+
+
+cond2 <- factor(condition_sling[assignment == 2])
+t2 <- ptAs[assignment == 2]
+model2 <- nnet::multinom(cond2 ~ t2)
+zvalues2 <- summary(model2)$coefficients / summary(model2)$standard.errors
+pnorm(abs(zvalues2), lower.tail=FALSE)*2
+
+dses_2 <- data.frame(t2 = seq(min(t2),max(t2),length.out = 100))
+predictions_lineage2 <- predict(model2, newdata = dses_2, "probs")
+plot(dses_2$t2, unname(predictions_lineage2[,1]), pch = 19, col = "royalblue1",xlab = 'Pseudotime',ylab = 'Probability',ylim = c(0,1), main = 'Lineage 2')
+points(dses_2$t2, unname(predictions_lineage2[,2]), pch = 19, col = "firebrick1")
+points(dses_2$t2, unname(predictions_lineage2[,3]), pch = 19, col = "blueviolet")
+legend('topright', legend=c("Sham", "Vehicle", "RRx-001"), col=c("blueviolet","royalblue1", "firebrick1"), pch = 19, cex=1, bty = "n")
+
+
+cond3 <- factor(condition_sling[assignment == 3])
+t3 <- ptAs[assignment == 3]
+model3 <- nnet::multinom(cond3 ~ t3)
+zvalues3 <- summary(model3)$coefficients / summary(model3)$standard.errors
+pnorm(abs(zvalues3), lower.tail=FALSE)*2
+
+dses_3 <- data.frame(t3 = seq(min(t3),max(t3),length.out = 100))
+predictions_lineage3 <- predict(model3, newdata = dses_3, "probs")
+plot(dses_3$t3, unname(predictions_lineage3[,1]), pch = 19, col = "royalblue1",xlab = 'Pseudotime',ylab = 'Probability',ylim = c(0,1), main = 'Lineage 3')
+points(dses_3$t3, unname(predictions_lineage3[,2]), pch = 19, col = "firebrick1")
+points(dses_3$t3, unname(predictions_lineage3[,3]), pch = 19, col = "blueviolet")
+legend('topright', legend=c("Sham", "Vehicle", "RRx-001"), col=c("blueviolet","royalblue1", "firebrick1"), pch = 19, cex=1, bty = "n")
+
+# Figure 3E ----
+aggregate_rrx <- AggregateExpression(rrx.integrated, group.by = 'celltype.comb', return.seurat = TRUE, assay = 'RNA')
+
+f1 <- CellScatter(aggregate_rrx, 'LpM-endo-control',  'LpM-endo-drug') + labs(title = 'LpM') + geom_abline(slope=1)
+
+f2 <- CellScatter(aggregate_rrx, 'SpM-endo-control',  'SpM-endo-drug') + labs(title = 'SpM') + geom_abline(slope=1)
+
+f1 / f2
+
+# Figure 3F ----
+Idents(rrx.integrated_3_macs) <- 'celltype.comb'
+LpM_d <- FindMarkers(rrx.integrated_3_macs, ident.1 = "LpM_endo_drug", ident.2 = c("LpM_endo_control"), assay = "RNA", only.pos = FALSE, min.pct = 0.2, test.use = "MAST")
+LpM_c <- FindMarkers(rrx.integrated_3_macs, ident.1 = "LpM_endo_control", ident.2 = "LpM_sham", assay = "RNA", only.pos = FALSE, min.pct = 0.2, test.use = "MAST")
+
+SpM_d <- FindMarkers(rrx.integrated_3_macs, ident.1 = "SpM_endo_drug", ident.2 = c("SpM_endo_control"), assay = "RNA", only.pos = FALSE, min.pct = 0.2, test.use = "MAST")
+SpM_c <- FindMarkers(rrx.integrated_3_macs, ident.1 = "SpM_endo_control", ident.2 = "SpM_sham", assay = "RNA", only.pos = FALSE, min.pct = 0.2, test.use = "MAST")
+
+lpm_d_entrez <- bitr(rownames(LpM_d), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db", drop = FALSE)
+lpm_d_genelist_df <- LpM_d %>% rownames_to_column('Symbol') %>% dplyr::inner_join(lpm_d_entrez, by = join_by(Symbol == SYMBOL)) %>%
+  dplyr::arrange(desc(avg_log2FC)) %>% drop_na(ENTREZID) %>% dplyr::select(avg_log2FC, ENTREZID) %>%
+  dplyr::mutate(Group = 'LpM_d')
+
+lpm_c_entrez <- bitr(rownames(LpM_c), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db", drop = FALSE)
+lpm_c_genelist_df <- LpM_c %>% rownames_to_column('Symbol') %>% dplyr::inner_join(lpm_c_entrez, by = join_by(Symbol == SYMBOL)) %>%
+  dplyr::arrange(desc(avg_log2FC)) %>% drop_na(ENTREZID) %>% dplyr::select(avg_log2FC, ENTREZID) %>%
+  dplyr::mutate(Group = 'LpM_c')
+
+spm_d_entrez <- bitr(rownames(SpM_d), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db", drop = FALSE)
+spm_d_genelist_df <- SpM_d %>% rownames_to_column('Symbol') %>% dplyr::inner_join(spm_d_entrez, by = join_by(Symbol == SYMBOL)) %>%
+  dplyr::arrange(desc(avg_log2FC)) %>% drop_na(ENTREZID) %>% dplyr::select(avg_log2FC, ENTREZID) %>%
+  dplyr::mutate(Group = 'SpM_d')
+
+spm_c_entrez <- bitr(rownames(SpM_c), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db", drop = FALSE)
+spm_c_genelist_df <- SpM_c %>% rownames_to_column('Symbol') %>% dplyr::inner_join(spm_c_entrez, by = join_by(Symbol == SYMBOL)) %>%
+  dplyr::arrange(desc(avg_log2FC)) %>% drop_na(ENTREZID) %>% dplyr::select(avg_log2FC, ENTREZID) %>%
+  dplyr::mutate(Group = 'SpM_c')
+
+cluster_df <- rbind(lpm_d_genelist_df, spm_d_genelist_df) #lpm_c_genelist_df, spm_c_genelist_df)
+
+cluster_list <- list(LpM_d = setNames(lpm_d_genelist_df$avg_log2FC, lpm_d_genelist_df$ENTREZID),
+                     LpM_c = setNames(lpm_c_genelist_df$avg_log2FC, lpm_c_genelist_df$ENTREZID),
+                     SpM_d = setNames(spm_d_genelist_df$avg_log2FC, spm_d_genelist_df$ENTREZID)),
+                     SpM_c = setNames(spm_c_genelist_df$avg_log2FC, spm_c_genelist_df$ENTREZID))
+
+cluster_res_gse_go <- compareCluster(cluster_list, fun = 'gseGO', OrgDb = org.Mm.eg.db, pvalueCutoff = 0.20, scoreType = "pos")
+cluster_res_gse_go@compareClusterResult$Description <- gsub(pattern = " - Mus musculus (house mouse)", replacement = "", cluster_res_gse_go@compareClusterResult$Description, fixed = T)
+
+cluster_res_gse_go_s <- simplify(
+  cluster_res_gse_go,
+  cutoff = 0.7,
+  by = "p.adjust",
+  select_fun = min,
+  measure = "Wang",
+  semData = NULL
+)
+
+enrichplot::dotplot(cluster_res_gse_go_s, showCategory = 5, includeAll = FALSE, font.size = 8, split = '.sign') + facet_grid(~.sign) + 
+  scale_fill_gradientn(colours=c("#f7ca64", "#46bac2", "#7e62a3"))
+
+
