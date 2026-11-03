@@ -14,16 +14,6 @@ library(ggupset)
 RRx_integrated <- readRDS("pathtofile.RDS")
 
 # Figure 2B ----
-rrx.integrated <- RenameIdents(rrx.integrated,   
-                                      c('0' = 'LpM 2',
-                                        '1' = 'LpM 5',
-                                        '2' = 'LpM 1',
-                                        '3' = 'LpM 3',
-                                        '4' = 'LpM 4',
-                                        '5' = 'SpM',
-                                        '7' = 'LpM 4',
-                                        '8' = 'LpM 6'))
-
 DimPlot(rrx.integrated, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 4.5) + NoLegend()
 
 # Figure 2B Inset ----
@@ -70,7 +60,6 @@ milo <- buildGraph(milo, k = 10, d = 30, reduced.dim = "PCA")
 milo <- makeNhoods(milo, prop = 0.1, k = 10, d = 30, refined = TRUE)
 milo <- countCells(milo, meta.data = colData(milo), sample = "sample_id")  
 
-
 design_df <- data.frame(
   sample_id = c("endo_drug", "endo_control", "sham"),
   condition = c("endo_drug", "endo_control", "sham")
@@ -82,13 +71,11 @@ counts <- nhoodCounts(milo)
 
 logFC_endo <- log2((counts[, "endo_control"] + 1) / (counts[, "sham"] + 1))
 
-
 da_endo <- data.frame(
   logFC = logFC_endo,
   Nhood = seq_len(nrow(counts)),
   SpatialFDR = 1  # Placeholder since we can't calculate significance
 )
-
 
 milo <- buildNhoodGraph(milo)
 plotNhoodGraphDA(milo, da_endo, alpha = 1) +
@@ -109,9 +96,7 @@ plotNhoodGraphDA(milo, da_drug, alpha = 1) +
 
 library(patchwork)
 
-
 lim <- max(abs(c(da_endo$logFC, da_drug$logFC)))
-
 
 p1 <- plotNhoodGraphDA(milo, da_endo, alpha = 1) +
   scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
@@ -226,7 +211,6 @@ top_go %>%
   theme_classic()
 
 # Figure 2I ----
-
 top_go %>%
   filter(cluster %in% clusters_to_plot) %>%
   group_by(cluster) %>%
