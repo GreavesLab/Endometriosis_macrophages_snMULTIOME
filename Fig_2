@@ -7,7 +7,9 @@ library(SeuratObject)
 library(dittoSeq)
 library(Nebulosa)
 library(miloR)
-
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(ggupset)
 
 RRx_integrated <- readRDS("pathtofile.RDS")
 
@@ -56,4 +58,200 @@ dittoBarPlot(rrx.integrated,
              x.labels.rotate = F)
 
 # Figure 2E ----
+DefaultAssay(rrx.integrated) <- "RNA"
+sce_milo <- as.SingleCellExperiment(rrx.integrated)
 
+milo <- Milo(sce_milo)
+
+reducedDim(milo, "PCA") <- Embeddings(rrx.integrated, reduction="pca")
+reducedDim(milo, "UMAP") <- Embeddings(rrx.integrated, reduction="wnn.umap")
+
+milo <- buildGraph(milo, k = 10, d = 30, reduced.dim = "PCA")
+milo <- makeNhoods(milo, prop = 0.1, k = 10, d = 30, refined = TRUE)
+milo <- countCells(milo, meta.data = colData(milo), sample = "sample_id")  
+
+
+design_df <- data.frame(
+  sample_id = c("endo_drug", "endo_control", "sham"),
+  condition = c("endo_drug", "endo_control", "sham")
+)
+rownames(design_df) <- design_df$sample_id
+
+milo <- countCells(milo, meta.data = colData(milo), sample = "sample_id")
+counts <- nhoodCounts(milo)
+
+logFC_endo <- log2((counts[, "endo_control"] + 1) / (counts[, "sham"] + 1))
+
+
+da_endo <- data.frame(
+  logFC = logFC_endo,
+  Nhood = seq_len(nrow(counts)),
+  SpatialFDR = 1  # Placeholder since we can't calculate significance
+)
+
+
+milo <- buildNhoodGraph(milo)
+plotNhoodGraphDA(milo, da_endo, alpha = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  ggtitle("Sham vs Vehicle")
+
+logFC_drug <- log2((counts[, "endo_drug"] + 1) / (counts[, "endo_control"] + 1))
+
+da_drug <- data.frame(
+  logFC = logFC_drug,
+  Nhood = seq_len(nrow(counts)),
+  SpatialFDR = 1
+)
+
+plotNhoodGraphDA(milo, da_drug, alpha = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  ggtitle("Vehicle vs RRx-001")
+
+library(patchwork)
+
+
+lim <- max(abs(c(da_endo$logFC, da_drug$logFC)))
+
+
+p1 <- plotNhoodGraphDA(milo, da_endo, alpha = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
+                       midpoint = 0, limits = c(-lim, lim)) +
+  ggtitle("Vehicle vs Sham")
+
+p2 <- plotNhoodGraphDA(milo, da_drug, alpha = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
+                       midpoint = 0, limits = c(-lim, lim)) +
+  ggtitle("RRx-001 vs Vehicle")
+
+
+p1 | p2 + plot_layout(guides = "collect")
+
+# Figure 2F ----
+genes <- c("Top2a","H2-Ab1", "Ccr2", "Cd74", "Timd4",  "Mrc1","Saa3","Wwp1","Adgre1", "C1qc","Alox15","Nrp1","Vsig4", "F13a1")
+
+SCpubr::do_ExpressionHeatmap(sample = rrx.integrated,
+                             features = genes, 
+                             group.by = c("annotated_clusters"),
+                             min.cutoff = 0.015,
+                             max.cutoff = 2,
+                             enforce_symmetry = F, cluster = T, use_viridis = T,
+                             legend.position = "right", flip = T)
+
+# Figure 2G ----
+markers <- FindMarkers(rrx.integrated, ident.1 = "LpM 1", ident.2 = c("LpM 2"), assay = "RNA", only.pos = FALSE, test.use = "MAST")
+names(keyvals)[keyvals == '#53B400'] <- 'Upregulated'
+names(keyvals)[keyvals == '#F8766D'] <- 'Downregulated'
+names(keyvals)[keyvals == 'grey70']  <- 'NS'
+
+EnhancedVolcano(markers,
+                lab = rownames(markers),
+                x = "avg_log2FC",
+                y = "p_val_adj",
+                selectLab = c('Cebpb', 'Cd86', 'Mtss1', 'Itsn1', 'Pdgfc', 'Saa3', 'Mrc1', 'Ccr2', 'H2-K1', 'H2-D1', 'H2-Ab1', 'C1qc', 'C1qa', 'F13a1', 'Nrp1'),
+                pCutoff = 10e-16,
+                FCcutoff = 0.5,
+                axisLabSize = 10,
+                titleLabSize = 10,
+                subtitleLabSize = 10,
+                captionLabSize = 10,
+                legendLabSize = 10,
+                legendIconSize = 5,
+                boxedLabels = TRUE,
+                parseLabels = FALSE,
+                labSize = 3,
+                shape = 1,
+                colCustom = keyvals,
+                drawConnectors = TRUE,
+                widthConnectors = 0.5,
+                colConnectors = 'grey50',
+                maxoverlapsConnectors = Inf)
+
+
+# Figure 2H ----
+all_markers <- FindAllMarkers(rrx.integrated, 
+                              only.pos = TRUE,
+                              min.pct = 0.25,
+                              logfc.threshold = 0.25)
+
+go_results <- lapply(unique(all_markers$cluster), function(cl) {
+  genes <- all_markers %>%
+    filter(cluster == cl, p_val_adj < 0.05) %>%
+    pull(gene)
+  
+  enrichGO(gene          = genes,
+           OrgDb         = org.Mm.eg.db,
+           keyType       = "SYMBOL",
+           ont           = "BP",
+           pAdjustMethod = "BH",
+           pvalueCutoff  = 0.05,
+           qvalueCutoff  = 0.05)
+})
+names(go_results) <- unique(all_markers$cluster)
+
+go_results_s <- lapply(go_results, function(res) {
+  req <- tryCatch(
+    simplify(
+      res,
+      cutoff     = 0.7,
+      by         = "p.adjust",
+      select_fun = min,
+      measure    = "Wang",
+      semData    = NULL
+    ),
+    error = function(e) NULL  
+  )
+})
+names(go_results_s) <- names(go_results)
+
+go_results_s <- Filter(Negate(is.null), go_results_s)
+
+top_go <- bind_rows(lapply(names(go_results_s), function(cl) {
+  res <- go_results[[cl]]
+  if (is.null(res) || nrow(res@result) == 0) return(NULL)
+  res@result %>%
+    arrange(pvalue) %>%
+    slice_head(n = 20) %>%
+    mutate(cluster = cl)
+}))
+
+top_go %>%
+  group_by(Description) %>%
+  summarise(clusters = list(cluster)) %>%
+  ggplot(aes(x = clusters, fill = after_stat(count))) +
+  geom_bar() +
+  scale_x_upset() +
+  scale_fill_viridis_c(option = "viridis", direction = -1, name = "GO terms") +
+  labs(x = NULL, y = "Number of GO terms",
+       title = "GO term sharing across clusters") +
+  theme_classic()
+
+# Figure 2I ----
+
+top_go %>%
+  filter(cluster %in% clusters_to_plot) %>%
+  group_by(cluster) %>%
+  slice_min(p.adjust, n = 5, with_ties = FALSE) %>%   # top 5 per cluster (explicit)
+  ungroup() %>%
+  mutate(term = paste(Description, cluster, sep = "___"),   # unique per facet
+         term = reorder(term, Count)) %>%
+  ggplot(aes(x = Count, y = term, fill = p.adjust)) +
+  geom_col() +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(sub("___.*$", "", x), 30)) +
+  scale_fill_viridis_c(
+    direction = 1,
+    trans     = "log10",
+    limits    = c(1e-5, 0.05),
+    breaks    = c(1e-5, 1e-4, 1e-3, 0.01, 0.05),
+    labels    = scales::scientific,
+    oob       = scales::squish,
+    name      = "Adj. p-value",
+    guide     = guide_colourbar(reverse = TRUE)
+  ) +
+  facet_wrap(~ cluster, scales = "free_y", ncol = 3) +
+  labs(x = "Gene count", y = NULL,
+       title = "Top GO:BP terms per macrophage cluster") +
+  theme_classic() +
+  theme(strip.text   = element_text(size = 12, face = "bold"),
+        axis.text.y  = element_text(size = 12),
+        legend.text  = element_text(size = 12),
+        legend.title = element_text(size = 12))
