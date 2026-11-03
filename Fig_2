@@ -1,0 +1,59 @@
+Figure 2: Multiomic analyses of RNA and ATAC modalities of peritoneal macrophages.
+
+library(SingleCellExperiment)
+library(Signac)
+library(Seurat)
+library(SeuratObject)
+library(dittoSeq)
+library(Nebulosa)
+library(miloR)
+
+
+RRx_integrated <- readRDS("pathtofile.RDS")
+
+# Figure 2B ----
+rrx.integrated <- RenameIdents(rrx.integrated,   
+                                      c('0' = 'LpM 2',
+                                        '1' = 'LpM 5',
+                                        '2' = 'LpM 1',
+                                        '3' = 'LpM 3',
+                                        '4' = 'LpM 4',
+                                        '5' = 'SpM',
+                                        '7' = 'LpM 4',
+                                        '8' = 'LpM 6'))
+
+DimPlot(rrx.integrated, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 4.5) + NoLegend()
+
+# Figure 2B Inset ----
+DimPlot(rrx.integrated, reduction = 'wnn.umap', split.by = 'sample_id', label = FALSE, label.size = 2.5) + NoLegend()
+
+# Figure 2C ----
+plot_density(rrx.integrated, "Ccr2")
+plot_density(rrx.integrated, "Ptprc")
+plot_density(rrx.integrated, "Itgam")
+plot_density(rrx.integrated, "Adgre1")
+plot_density(rrx.integrated, "Mrc1")
+plot_density(rrx.integrated, "H2-Ab1")
+
+# Figure 2D ----
+
+cluster_cols <- c("LpM 2" = "#F8766D",
+                  "LpM 5" = "#C49A00", 
+                  "LpM 1" = "#53B400",
+                  "LpM 3" = "#00C094",
+                  "LpM 4" = "#00B6EB",
+                  "SpM" = "#A58AFF",
+                  "LpM 6" = "#FB61D7")
+
+dittoBarPlot(rrx.integrated, 
+             var = "annotated_clusters", 
+             group.by = "sample_id",
+             color.panel = cluster_cols,
+             ylab = "Proportion",
+             xlab = NULL,
+             x.reorder = c(3, 1, 2),
+             x.labels = c("Sham", "Vehicle", "RRx-001"),
+             x.labels.rotate = F)
+
+# Figure 2E ----
+
