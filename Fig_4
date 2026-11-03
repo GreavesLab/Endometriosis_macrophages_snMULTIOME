@@ -1,0 +1,120 @@
+Figure 4: Differentially expressed genes and enriched DNA sequence motifs in predominant LpM populations. 
+
+library(SingleCellExperiment)
+library(Signac)
+library(Seurat)
+library(SeuratObject)
+options(Seurat.object.assay.version = "v3")
+library(patchwork)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(EnsDb.Mmusculus.v79)
+library(metap)
+library(limma)
+library(harmony)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(topGO)
+library(org.Mm.eg.db)
+library(devtools)
+library(ArchR)
+library(clustree)
+library(cowplot)
+library(EnhancedVolcano)
+library(gprofiler2)
+library(scDblFinder)
+library(DropletUtils)
+library(SoupX)
+library(DoubletFinder)
+library(knitr)
+library(MAST)
+library(monocle3)
+library(SeuratWrappers)
+library(slingshot)
+library(ggtech)
+library(extrafont)
+library(hrbrthemes)
+library(gcookbook)
+library(grDevices)
+library(RColorBrewer)
+library(nnet)
+library(ggsci)
+library(tradeSeq)
+library(GOSemSim)
+library(simplifyEnrichment)
+library(motifmatchr)
+library(JASPAR2024)
+library(TFBSTools)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(purrr)
+library(ggseqlogo)
+library(magrittr)
+library(patchwork)
+library(scCustomize)
+library(qs)
+library(dittoSeq)
+library(Nebulosa)
+library(miloR)
+library(clusterProfiler)
+library(ggupset)
+
+RRx_integrated <- readRDS("pathtofile.RDS")
+
+# Figure 4A ----
+rrx.integrated <- RegionStats(rrx.integrated_3, genome = BSgenome.Mmusculus.UCSC.mm10)
+rrx.integrated <- LinkPeaks(object = rrx.integrated, peak.assay = "peaks", expression.assay = "RNA")
+
+cov_plot_h1 <- CoveragePlot(
+  object = rrx.integrated,
+  region = c("Ccr2"),
+  features = c("Ccr2"),
+  expression.assay = "RNA",
+  extend.upstream = 1000,
+  extend.downstream = 1000,
+  ncol = 1,
+  links = TRUE,
+  peaks = TRUE,
+  annotation = TRUE
+)
+cov_plot_h1 
+
+# Figure 4B ----
+cov_plot_h2 <- CoveragePlot(
+  object = rrx.integrated,
+  region = c("Gata6"),
+  features = c("Gata6"),
+  expression.assay = "RNA",
+  extend.upstream = 1000,
+  extend.downstream = 1000,
+  ncol = 1,
+  links = TRUE,
+  peaks = TRUE,
+  annotation = TRUE
+)
+cov_plot_h2
+
+# Figure 4C ----
+top_motifs <- motif_combined %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::arrange(p.adjust) %>%
+  dplyr::slice_head(n = 5) %>%
+  dplyr::ungroup()
+
+ggplot(top_motifs, aes(x = cluster, y = motif.name, 
+                       size = fold.enrichment, 
+                       colour = -log10(p.adjust))) +
+  geom_point() +
+  scale_colour_viridis_c(name = "-log10(p.adjust)") +
+  scale_size_continuous(name = "Fold enrichment") +
+  theme_bw() +
+  labs(x = "Cluster", y = "TF Motif", 
+       title = "Enriched TF motifs by macrophage cluster") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Figure 4D ----
+MotifPlot(
+  object = rrx.integrated,
+  motifs = head(rownames(enriched_drug_motifs)),
+  assay = 'peaks'
+)
+
