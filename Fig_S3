@@ -1,0 +1,78 @@
+Figure S3: Isolation of macrophage for integrative weighted nearest neighbours (WNN) analysis and between condition transcriptomic comparisons. 
+
+library(SingleCellExperiment)
+library(Signac)
+library(Seurat)
+library(SeuratObject)
+options(Seurat.object.assay.version = "v3")
+library(patchwork)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(EnsDb.Mmusculus.v79)
+library(metap)
+library(limma)
+library(harmony)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(topGO)
+library(org.Mm.eg.db)
+library(devtools)
+library(ArchR)
+library(clustree)
+library(cowplot)
+library(EnhancedVolcano)
+library(gprofiler2)
+library(scDblFinder)
+library(DropletUtils)
+library(SoupX)
+library(DoubletFinder)
+library(knitr)
+library(MAST)
+library(monocle3)
+library(SeuratWrappers)
+library(slingshot)
+library(ggtech)
+library(extrafont)
+library(hrbrthemes)
+library(gcookbook)
+library(grDevices)
+library(RColorBrewer)
+library(nnet)
+library(ggsci)
+library(tradeSeq)
+library(GOSemSim)
+library(simplifyEnrichment)
+library(motifmatchr)
+library(JASPAR2024)
+library(TFBSTools)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(purrr)
+library(ggseqlogo)
+library(magrittr)
+library(patchwork)
+library(scCustomize)
+library(qs)
+library(dittoSeq)
+library(Nebulosa)
+library(miloR)
+library(clusterProfiler)
+library(ggupset)
+
+RRx_integrated_allcells <- readRDS("pathtofile.RDS")
+
+# Figure S3B ----
+
+DimPlot(rrx.integrated_allcells, reduction = 'pca.umap', label = FALSE, repel = TRUE, label.size = 5) + NoLegend()
+DimPlot(rrx.integrated_allcells, reduction = 'harmony.umap', label = FALSE, repel = TRUE, label.size = 5) + NoLegend()
+DimPlot(rrx.integrated_allcells, reduction = 'wnn.umap', label = FALSE, repel = TRUE, label.size = 5) + NoLegend()
+
+# Figure S3C ----
+FeaturePlot(rrx.integrated_allcells, reduction = "wnn.umap", features = c("integrated.weight", "peaks.weight", "nucleosome_signal", "log10GenesPerUMI"), cols = c("lightgrey", "orchid4"))
+
+# Figure S3D ----
+DimPlot(rrx.integrated_allcells, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 5) + NoLegend()
+
+# Figure S3E ----
+FeaturePlot(rrx.integrated_allcells, reduction = "wnn.umap", features = c("Skap1", "Ebf1","Vmn2r96" ), cols = c("lightgrey", "orchid4"))
+
+# Figure S3F ----
