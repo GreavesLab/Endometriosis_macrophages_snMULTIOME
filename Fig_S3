@@ -76,3 +76,63 @@ DimPlot(rrx.integrated_allcells, reduction = 'wnn.umap', label = TRUE, repel = T
 FeaturePlot(rrx.integrated_allcells, reduction = "wnn.umap", features = c("Skap1", "Ebf1","Vmn2r96" ), cols = c("lightgrey", "orchid4"))
 
 # Figure S3F ----
+Idents(rrx.integrated) <- rrx.integrated$sample_id
+
+avg_exp <- AverageExpression(rrx.integrated,
+                             assays = "RNA",
+                             group.by = "sample_id")$RNA
+
+samp_map <- c("sham" = "sham",
+              "endo_control" = "endo-control",
+              "endo_drug" = "endo-drug")
+
+plot_labels <- c("sham" = "Sham vs rest",
+                 "endo_control" = "Vehicle vs rest",
+                 "endo_drug" = "RRx-001 vs rest")
+
+ma_plots <- list()
+
+for (samp in names(samp_map)) {
+  
+  df <- Sample.markers.all %>% filter(cluster == samp)
+  rownames(df) <- df$gene
+  
+  common_genes <- intersect(df$gene, rownames(avg_exp))
+  df <- df[common_genes, ]
+  
+  this_col  <- samp_map[[samp]]
+  other_col <- setdiff(colnames(avg_exp), this_col)
+  
+  df$baseMean <- (avg_exp[common_genes, this_col] +
+                    rowMeans(avg_exp[common_genes, other_col, drop = FALSE])) / 2
+  
+  df$sig <- ifelse(df$p_val_adj < 0.05 & abs(df$avg_log2FC) > 0.5, "Sig", "NS")
+  
+  n_up   <- sum(df$p_val_adj < 0.01 & df$avg_log2FC >  0.5, na.rm = TRUE)
+  n_down <- sum(df$p_val_adj < 0.01 & df$avg_log2FC < -0.5, na.rm = TRUE)
+  
+  ma_plots[[samp]] <- ggplot(df, aes(x = log10(baseMean + 1), y = avg_log2FC, color = sig)) +
+    geom_point(size = 1, alpha = 0.6) +
+    geom_hline(yintercept = c(-0.5, 0, 0.5),
+               linetype = c("dashed", "solid", "dashed"),
+               color = c("blue", "black", "red")) +
+    geom_text_repel(data = subset(df, p_val_adj < 0.05 & abs(avg_log2FC) > 1),
+                    aes(label = gene), size = 3, max.overlaps = 10, color = "black") +
+    scale_color_manual(values = c("NS" = "grey70", "Sig" = "red")) +
+ theme_classic() +
+    labs(x = "Log10 Mean Expression",
+         y = "Log2 Fold Change",
+         title = plot_labels[[samp]])
+}
+
+wrap_plots(ma_plots[c("sham", "endo_control", "endo_drug")],
+           ncol = 3, guides = "collect")
+
+# Figure S3G ----
+
+gse_kegg <- compareCluster(cluster_list, fun = 'gseKEGG', organism = 'mmu', pvalueCutoff = 0.20, scoreType = "pos")
+strip_species <- function(x) { x@compareClusterResult$Description <- gsub(" - Mus musculus (house mouse)", "", x@compareClusterResult$Description, fixed = TRUE); x }
+gse_kegg <- strip_species(gse_kegg)
+
+enrichplot::dotplot(gse_kegg, showCategory = 5, includeAll = FALSE, font.size = 8, split = '.sign') + facet_grid(~.sign) +
+  scale_fill_gradientn(colours = c("#f7ca64", "#46bac2", "#7e62a3"))
